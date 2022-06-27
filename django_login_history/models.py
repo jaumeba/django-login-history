@@ -1,6 +1,6 @@
 
 
-from django.conf import settings as conf_settings
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.signals import user_logged_in
 from django.db import models
@@ -33,6 +33,13 @@ class Login(models.Model):
         return self.user.username + " (" + self.ip + ") at " + str(self.date)
 
 
+def use_internet():
+    if hasattr(settings, "DJANGO_LOGIN_HISTORY_USE_INTERNET"):
+        return settings.DJANGO_LOGIN_HISTORY_USE_INTERNET
+    else:
+        return True
+
+
 def get_client_ip(request):
     """
     :param request:
@@ -40,10 +47,7 @@ def get_client_ip(request):
     """
 
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(',')[0]
-    else:
-        ip = request.META.get('REMOTE_ADDR')
+    ip              = x_forwarded_for.split(',')[0] if x_forwarded_for else request.META.get('REMOTE_ADDR')
 
     if not ip:
         raise(ConnectionError("No se ha podido obtener la IP"))
@@ -57,16 +61,15 @@ def get_internal_external_ip(request):
     :return:
     """
 
-    ip = get_client_ip(request)
+    iploc = get_client_ip(request)
 
-    if ipaddress.ip_address(ip).is_private:
-        if hasattr(conf_settings, 'IP_PLACEHOLDER'):
-            ip = conf_settings.IP_PLACEHOLDER
-        ipext = requests.get("https://api.ipify.org/?format=json").json().get("ip")
-    else:
-        ipext = ip
+    if ipaddress.ip_address(iploc).is_private:
+        if hasattr(settings, 'IP_PLACEHOLDER'):
+            iploc = settings.IP_PLACEHOLDER
 
-    return [ip, ipext]
+    ipext = requests.get("https://api.ipify.org/?format=json").json().get("ip") if use_internet() else None
+
+    return [iploc, ipext]
 
 
 def get_location_data(request):
@@ -78,11 +81,11 @@ def get_location_data(request):
     """
 
     ips  = get_internal_external_ip(request)
-    data = requests.get("http://ip-api.com/json/"+ips[1]).json()
+    data = requests.get("http://ip-api.com/json/"+ips[1]).json() if use_internet() else {}
 
-    data["ip"] = ips[0]
+    data["ip"]          = ips[0]
     data["external_ip"] = ips[1]
-    data["user_agent"]=request.META['HTTP_USER_AGENT']
+    data["user_agent"]  =request.META['HTTP_USER_AGENT']
 
     return data
 
