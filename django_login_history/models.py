@@ -1,80 +1,117 @@
-from django.contrib.auth.signals import user_logged_in
-from django.dispatch import receiver
-from django.db import models
-import json
-import requests
-import ipaddress
+
+
 from django.conf import settings as conf_settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.signals import user_logged_in
+from django.db import models
+from django.dispatch import receiver
+from json import JSONDecodeError
+from requests.exceptions import ConnectionError
+
+import requests
+import ipaddress
 
 
 
 '''
-
 Models
-
 '''
 
 class Login(models.Model):
-    user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE)
-    ip = models.CharField(max_length=15)
-    user_agent = models.TextField()
-    date = models.DateTimeField(auto_now_add=True)
-
-    country = models.CharField(max_length=50)
-    region = models.CharField(max_length=50)
-    city = models.CharField(max_length=50)
-    lon = models.FloatField(default=0.0)
-    lat = models.FloatField(default=0.0)
+    user        = models.ForeignKey(get_user_model(), on_delete=models.CASCADE)
+    ip          = models.CharField(max_length=15, null=True)
+    external_ip = models.CharField(max_length=15, null=True)
+    user_agent  = models.TextField()
+    date        = models.DateTimeField(auto_now_add=True)
+    country     = models.CharField(max_length=50, null=True)
+    region      = models.CharField(max_length=50, null=True)
+    city        = models.CharField(max_length=50, null=True)
+    lon         = models.FloatField(default=0.0, null=True)
+    lat         = models.FloatField(default=0.0, null=True)
 
     def __str__(self):
         return self.user.username + " (" + self.ip + ") at " + str(self.date)
 
 
-
 def get_client_ip(request):
+    """
+    :param request:
+    :return:
+    """
+
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
         ip = x_forwarded_for.split(',')[0]
     else:
         ip = request.META.get('REMOTE_ADDR')
 
+    if not ip:
+        raise(ConnectionError("No se ha podido obtener la IP"))
+
     return ip
 
-def get_location_data__from_ip(ip):
 
-    # if ip is local (so it's impossible to find lat/long coords and location) project will use random google ip as placeholder]
-    print(ipaddress.ip_address(ip).is_private)
+def get_internal_external_ip(request):
+    """
+    :param request:
+    :return:
+    """
+
+    ip = get_client_ip(request)
+
     if ipaddress.ip_address(ip).is_private:
         if hasattr(conf_settings, 'IP_PLACEHOLDER'):
             ip = conf_settings.IP_PLACEHOLDER
-        else:
-            ip = "216.58.201.110"
+        ipext = requests.get("https://api.ipify.org/?format=json").json().get("ip")
     else:
-        pass
+        ipext = ip
 
-    url = "http://ip-api.com/json/"+ip
-
-    locationInfo = requests.get(url).json()
-    return locationInfo
+    return [ip, ipext]
 
 
+def get_location_data(request):
+    """
+    # if ip is local (so it's impossible to find lat/long coords and location)
+    # project will use random google ip as placeholder]
+    :param request:
+    :return:
+    """
+
+    ips  = get_internal_external_ip(request)
+    data = requests.get("http://ip-api.com/json/"+ips[1]).json()
+
+    data["ip"] = ips[0]
+    data["external_ip"] = ips[1]
+    data["user_agent"]=request.META['HTTP_USER_AGENT']
+
+    return data
 
 
 @receiver(user_logged_in)
 def post_login(sender, user, request, **kwargs):
+    """
+    :param sender:
+    :param user:
+    :param request:
+    :param kwargs:
+    :return:
+    """
 
-    ip = get_client_ip(request)
-    locationInfo = get_location_data__from_ip(ip)
+    try:
+        location_info = get_location_data(request)
+    except ConnectionError:
+        location_info = {}
+    except JSONDecodeError:
+        location_info = {}
 
-    login = Login.objects.create(
+    Login.objects.create(
         user=user,
-        ip=ip,
-        user_agent=request.META['HTTP_USER_AGENT'],
-        country=locationInfo["country"],
-        region=locationInfo["region"],
-        city=locationInfo["city"],
-        lon=locationInfo["lon"],
-        lat=locationInfo["lat"],
+        ip=location_info.get("ip"),
+        external_ip=location_info.get("external_ip"),
+        user_agent=location_info.get("user_agent"),
+        country=location_info.get("country"),
+        region=location_info.get("region"),
+        city=location_info.get("city"),
+        lon=location_info.get("lon"),
+        lat=location_info.get("lat"),
     )
-    print(login)
