@@ -20,7 +20,6 @@ Models
 class Login(models.Model):
     user        = models.ForeignKey(get_user_model(), on_delete=models.CASCADE)
     ip          = models.CharField(max_length=15, null=True)
-    external_ip = models.CharField(max_length=15, null=True)
     user_agent  = models.TextField()
     date        = models.DateTimeField(auto_now_add=True)
     country     = models.CharField(max_length=50, null=True)
@@ -52,24 +51,11 @@ def get_client_ip(request):
     if not ip:
         raise(ConnectionError("No se ha podido obtener la IP"))
 
-    return ip
-
-
-def get_internal_external_ip(request):
-    """
-    :param request:
-    :return:
-    """
-
-    iploc = get_client_ip(request)
-
-    if ipaddress.ip_address(iploc).is_private:
+    if ipaddress.ip_address(ip).is_private:
         if hasattr(settings, 'IP_PLACEHOLDER'):
-            iploc = settings.IP_PLACEHOLDER
+            ip = settings.IP_PLACEHOLDER
 
-    ipext = requests.get("https://api.ipify.org/?format=json").json().get("ip") if use_internet() else None
-
-    return [iploc, ipext]
+    return ip
 
 
 def get_location_data(request):
@@ -80,12 +66,11 @@ def get_location_data(request):
     :return:
     """
 
-    ips  = get_internal_external_ip(request)
-    data = requests.get("http://ip-api.com/json/"+ips[1]).json() if use_internet() else {}
+    ip  = get_client_ip(request)
+    data = requests.get("http://ip-api.com/json/"+ip).json() if use_internet() else {}
 
-    data["ip"]          = ips[0]
-    data["external_ip"] = ips[1]
-    data["user_agent"]  =request.META['HTTP_USER_AGENT']
+    data["ip"]          = ip
+    data["user_agent"]  = request.META['HTTP_USER_AGENT']
 
     return data
 
