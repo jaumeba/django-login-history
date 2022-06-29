@@ -95,7 +95,6 @@ def post_login(sender, user, request, **kwargs):
     Login.objects.create(
         user=user,
         ip=location_info.get("ip"),
-        external_ip=location_info.get("external_ip"),
         user_agent=location_info.get("user_agent"),
         country=location_info.get("country"),
         region=location_info.get("region"),
